@@ -1,0 +1,285 @@
+---
+title: "preliminary_analysis"
+author: "Rgoodsell"
+date: "2024-01-09"
+output: workflowr::wflow_html
+editor_options:
+  chunk_output_type: console
+---
+---
+title: "Preliminary analysis of Feeding guild phenology"
+author: "Rgoodsell"
+date: "2024-01-08"
+output:
+  html_document:
+    toc: no
+    df_print: paged
+  workflowr::wflow_html:
+    toc: no
+    code_folding: hide
+  html_notebook: default
+site: workflowr::wflow_site
+editor_options:
+  chunk_output_type: console
+---
+
+## Introduction
+
+This site serves to document the preliminary analyses aimed at investigating the seasonal dynamics and phenology of feeding guild communities using the IBA data. Organisms in the IBA data can be grouped by their feeding niche into 6 categories, phytopahgous, predatory, saprophagous, and their corresponding parasitoids, by using the feeding guild classifications from Ronquist et al (2018). For each of these groups we can examine how guild-specific species richness accumulates across the year and in response to environmental drivers. The preliminary research questions are:
+
+1. What shape does the phenology of each feeding guild community take across the year.
+2. How does the environment shape the phenology of each group.
+3. Do changes in environment shape host-parasitoid relationships at the community level?
+
+
+```{r, message=FALSE , warning=FALSE , fig.cap="The seasonal trends in species richness in each feeding niche across Sweden"}
+# Plot the Species-richness vs 
+
+#Packages
+library(tidyverse)
+
+weekly_temp <- readRDS("data/weekly_temp.rds") # Environmental data
+niche_sr    <- readRDS("data/niche_SR_data.rds")  # Species richness data by feeding niche
+
+
+all_data <- full_join(weekly_temp, niche_sr , by = c("trap_id" , "week_year")) |>
+            mutate(trap_id = factor(trap_id)) |> 
+            drop_na() |> droplevels()
+
+#
+ggplot(all_data , aes(week_year , n_OTU))+
+  geom_point(alpha = .01)+
+  facet_wrap(~feeding_niche)+
+    geom_smooth(method="gam" , 
+              formula = y~s(x,bs="cc" , k = 6))+
+  theme_linedraw()
+
+```
+
+These are some basic fits to the raw data, without a model to account for sampling effort, this is why we see the second peak in the winter months as we switch from weekly to monthly sample collection. From now on all plots appear in the same order as above. 
+
+
+## Methods - Hiearchical GAMS
+To investigate how species richness of each feeding-niche changes over time I fit hierarchical generalised additive models to each group using the ´mgcv´ package in R. These models allow flexible modelling of non-linear effects such as environmental niches, and the seasonal component of community phenology. For each group a simplified model looks like:
+
+$$ y = \beta_{hab} x_{hab}  + \tau(X, Y) + \tau(x_{week},x_{temp}) + \mu_{site} + log(E) $$ 
+Each model term represents the impact of the following on species richness (y):
+
+
+- $\beta_{hab} x_{hab}$ : The linear effect of habitat type - to account for habitat effects.
+
+
+- $\tau(x_{week},x_{temp})$ : Non-linear interaction between Longitude (X) and Latitude (Y) - to account for spatial / sampling effects.
+
+
+- $\tau(x_{week},x_{temp})$: Non-linear interaction between phenological component (week) and temperature. Included to investigate how environment might change phenology. Includes separate non-linear effects of both week and temperature.
+
+
+- $\mu_{site}$: Random effect of site. 
+
+
+- $\log(E)$ : An offset to account for sampling effort.
+
+So far I haven't done any formal model selection, as I just wanted to get to grips with the ideas and model framework first. Any results presented from here on are preliminary, and effects might drop out after we have done model comparison etc. The framework is also subject to change, as I think it would be better to model all groups hierarchically in the same model instead of separate models for each species. There is scope to do this within ´mgcv´, but I need to do a bit more reading first. 
+
+```{r , eval=FALSE}
+
+# Use mgcv
+library(mgcv)
+
+# Split data into each guild / niche
+all_split        <- all_data |> group_by(feeding_niche) |> group_split()
+names(all_split) <- c("Phyt" , "Pred" , "Sap" , "Phyt-P" , "Pred-P" , "Sap-P")
+
+modList <- list()
+for(i in seq_along(all_split)){
+  modList[[i]] <- gam(n_OTU ~ ti(week_year , bs = "cc") # Main non-linear effects
+                            + ti(mean_temp , bs = "cr") 
+                            + ti(week_year , mean_temp , bs =c("cr")) # Interactions
+                            + s(longitude_wgs84 , latitude_wgs84 , bs = "ts") # Spatial component
+                            + s(trap_id , bs = "re") # Random effect of site
+                            + trap_habitat  # Habitat linear effect
+                            + offset(log(sampling_time)), # Offset
+                            family = "nb" ,  data = all_split[[i]], # Negative binomial link 
+                            method = "REML") 
+  }
+
+names(modList) <- names(all_split)
+
+
+```
+
+
+
+## Preliminary results
+Here we can inspect the model fits to examine the impact of each term. We can start with the control variables to examine general effects on species richness for each group. 
+### Habitat effects 
+
+
+```{r , message = FALSE , warning=FALSE , fig.cap="Habitat coefficients for each group. Alpine habitats are set as the reference level"}
+
+library(mgcViz)
+
+#Load pre-fit models
+modList <- readRDS("output/prelim_gam_fits.rds")
+
+# Plot the habitat effects for each feeding-niche
+par(mfrow = c(2,3))
+hab_list <- list()
+for(i in 1:6){
+  # Get coefficients and tidy
+  coefs           <- coef(modList[[i]])
+  beta_hab        <- coefs[str_detect(names(coefs),"trap_habitat")]
+  names(beta_hab) <- str_remove(names(beta_hab) , "trap_habitat")
+  hab_list[[i]]  <- data.frame(beta_hab) |>
+                    rownames_to_column(var = "habitat") |>
+                    mutate(group = names(modList[i]))
+ }
+  
+
+# Bind rows and reorder levels for plotting
+hab_eff <- bind_rows(hab_list) 
+hab_eff$group <- factor(hab_eff$group , 
+                        levels = c("Phyt" , "Pred" , "Sap" , "Phyt-P" , "Pred-P" , "Sap-P"))
+
+# Plot
+hab_eff |> 
+    ggplot(aes(habitat, beta_hab))+
+      geom_point(aes(colour = group))+
+      facet_wrap(~group)+
+      theme_linedraw()+
+      theme(axis.text.x = element_text(angle = 90))
+
+
+```
+
+The coefficient plot above shows how species richness changes with habitat (higher), it's nice to see that parasitoids mostly mirror their host communities in habitat preferences.
+
+### Spatial component
+
+```{r , message=FALSE , warning=FALSE , fig.cap="Spatial smooths"}
+library(gratia)
+plist <- list()
+for(i in 1:6) {
+  plist[[i]]<- draw(modList[[i]] , select=6) + theme(title = element_blank())
+}
+
+gridExtra::grid.arrange(grobs=plist,ncol=3)
+
+```
+
+Here we see the spatial smooths for each group. The plots represent lon vs lat (x & y) across the whole of Sweden. Red indicates a higher richness at those locations, blue lower richness. Some of these have very small effect sizes, but an interesting observation is that parasitoids have higher richness in Northen sites than in lower sites. Saprophages show a similar trend with higher richness in the North of the country. 
+
+
+
+### Phenological component
+```{r , message = FALSE , warning=FALSE}
+
+library(tidymv) 
+
+# Plot main phenological and temperature effects
+par(mfrow = c(2,3))
+for(i in 1:6){
+plot.gam(modList[[i]] , select = 1)
+  title(names(modList[i]))
+  }
+
+
+
+```
+
+These all show the expected patterns, with some interesting things happening in the Saprophage & parasitoid communities. I suspect there are two groups of organisms here, accounting for the bimodality in the peak. Might be worth doing some extra filtering to remove collembolans & other soil living organisms?
+
+### Temperature
+```{r , message = FALSE , warning=FALSE}
+
+# Plot main phenological and temperature effects
+par(mfrow = c(2,3))
+for(i in 1:6){
+plot.gam(modList[[i]] , select = 2)
+  title(names(modList[i]))
+  }
+
+
+
+```
+
+With only one year of data it becomes quite hard to start to see where the thermal optima for these communities are, except those for Saprophages. This might make our inference for the interaction between phenology and temperature more difficult as we lake the annual variation in min / max temperature across our phenological component.
+
+### Phenology & temperature interaction
+
+```{r , message = FALSE , warning=FALSE}
+# Plot interaction
+par(mfrow = c(2,3))
+for(i in 1:6){
+vis.gam(modList[[i]], plot.type="contour", 
+        view=c('week_year', 'mean_temp'), too.far = .1)
+  }
+
+
+
+```
+
+Plotting the interactions allows us to see that we generally expect higher species richness peaks wither higher summer temps, and lower winter richness with lower winter temps. There may be some changes in phenology with regard to the timing of events, but it is hard to see with just a simple plot of interaction terms. To examine what's going on in more detail we need to simulate from the model. 
+
+### Simulating from the model
+The code below simulates the effect of fluctuations in environment on the timing of peak species richness for each community. 
+
+
+```{r , message=FALSE ,warnings=FALSE}
+# Source simulation functions
+library(MASS)
+source("code/functions.R")
+
+# Split data into each guild / niche
+all_split        <- all_data |> group_by(feeding_niche) |> group_split()
+names(all_split) <- c("Phyt" , "Pred" , "Sap" , "Phyt-P" , "Pred-P" , "Sap-P")
+
+# Code to get the seasonal trend in temperature.
+n_obs <- 1e3
+t_trend <- get_env_s(all_data$week_year , 5 , all_data$mean_temp , n_obs = n_obs)
+p_trend <- 0
+
+
+# Build new data 
+delta_temp <- rep(seq(0, 3 , l = 10) , each = length(modList)) |> round(2)
+new_phen_dat <- mapply(build_new_data , 
+                       fit_data   = all_split , 
+                       m_obj      = modList , 
+                       delta_temp = delta_temp , 
+                       MoreArgs   = list(delta_prec = 0, n_obs = n_obs , t_temp = t_trend , t_prec = p_trend) , 
+                       SIMPLIFY = FALSE)
+  
+names(new_phen_dat) <- paste(names(modList) , delta_temp , sep = "+")
+
+# simulate from model
+peak_sr <- mapply(simulate_MAP_max , 
+                  phen_dat = new_phen_dat ,
+                  m_obj = modList , 
+                  MoreArgs = list(n_sim = 10) , SIMPLIFY = FALSE)
+  
+
+```
+
+
+Now we can plot how the timing of peak species richness changes with higher temps
+```{r}
+
+# get peak results
+peaks <- lapply(peak_sr , "[[" , 1) |> bind_rows(.id = "id") |> 
+          mutate(guild      = str_extract(id , "^(.*?)(?=\\+)") , 
+                 temp_trend = str_extract(id,"(?<=\\+)(.*)") , 
+                 tlevel = ifelse(str_detect(guild , "\\-P") , "parasitoid" , "host")) 
+
+peaks$guild <- factor(peaks$guild , levels = c("Phyt" , "Pred" , "Sap" , "Phyt-P" , "Pred-P" , "Sap-P"))
+
+# Plot 
+ggplot(peaks , aes(peak , temp_trend))+
+  geom_point()+
+  geom_segment(aes(x = lwr , xend = upr , y = temp_trend , yend = temp_trend))+
+    facet_wrap(~guild , scales = "free")+
+  theme_linedraw()+
+  labs(y = "Temperature change" , x = "Week of peak")
+```
+
+This plot illustrates the change in peak species richness with up to +3° of warming a year (i.e. each day is up to +3° warmer). Each feeding guild and parasitoids show different resposnes. Phytophages show indifferent phenology (no change on average), whilst their parasitoids have advancing phenology (i.e. peak species richness is expected earlier). Predators show advancing phenology (peak earlier), but their parasitoid communities peak later, suggesting desynchronisation of community dynamics. Saprophages show noisy changes, but parasitoids tend to delay peak richness by two weeks. One thing to note here is that changes in timings are generally very small, there are a couple of things we can do that might improve this preliminary analysis that are generally low effort, including updating the environmental drivers, and changing the pheno-phase of interest (i.e. peak to 50th percentile of accumulation etc)
