@@ -1,0 +1,205 @@
+---
+title: "Preliminary model selection"
+author: "Rob goodsell"
+date: "2024-01-08"
+output:
+  html_document:
+    toc: no
+    df_print: paged
+  workflowr::wflow_html:
+    toc: no
+    code_folding: hide
+  html_notebook: default
+site: workflowr::wflow_site
+editor_options:
+  chunk_output_type: console
+---
+```{r setup, echo = F}
+knitr::opts_chunk$set(echo = F)
+```
+
+## Introduction
+This document illustrates some preliminary analysis and model selection steps taken when analysing the seasonal species richness trends of feeding guilds from the IBA data. Organisms in the IBA data can be grouped by their feeding niche into 6 categories, phytopahgous, predatory, saprophagous, and their corresponding parasitoids, by using the feeding guild classifications from Ronquist et al (2018). For each of these groups we can examine how guild-specific species richness accumulates across the year and in response to environmental drivers. The preliminary research questions are:
+
+1. What shape does the phenology of each feeding guild community take across the year.
+2. How does the environment shape the phenology of each group.
+3. Do changes in environment shape host-parasitoid relationships at the community level?
+
+Here we propose competing ecological hypothesis about how species richness of guilds change over time and in response to the environment. We fit "hierarchical" generalised additive models using the 'mgcv' package, to examine whether community seasonal and environmental responses vary by feeding niche. We then compare models using information criterion. 
+
+### Model I - No guild level responses.
+
+```{r , echo =FALSE , message = FALSE , warning=FALSE}
+# Read in already fitted models to make the example plots
+library(tidyverse)
+library(patchwork)
+library(mgcv)
+library(gratia)
+
+# Model fits
+modList     <- readRDS("data/model_selection_prelim.rds")
+weekly_temp <- readRDS("data/weekly_temp.rds") # Environmental data
+niche_sr    <- readRDS("data/niche_SR_data.rds")  # Species richness data by feeding niche
+all_data    <- full_join(weekly_temp, niche_sr , by = c("trap_id" , "week_year")) |>
+                mutate(trap_id = factor(trap_id)) |> 
+                drop_na() |> droplevels()
+
+# unlist and name
+mod_b   <- modList$mod_b
+mod_pt  <- modList$mod_pt
+mod_ps  <- modList$mod_ps
+mod_pb  <- modList$mod_pb
+mod_ptb <- modList$mod_ptb 
+
+
+# Model with varying seasonal component & temperature responses
+newdataT <- expand.grid(feeding_niche   =  unique(all_data$feeding_niche), 
+                       trap_id           = all_data$trap_id[1], 
+                       week_year         = 30 , 
+                       latitude_wgs84    = 64.1 , 
+                       longitude_wgs84   = 20.2 , 
+                       sampling_time     = 10 , 
+                       trap_habitat      = "forest", 
+                       mean_temp         = -10:10)
+
+# Get linear predictor values for fitted model for temperature response
+msmooths     <- smooths(mod_pb)
+ex           <- msmooths[str_detect(msmooths , "feeding_niche")]
+newdataT$lp <- predict(mod_pb , newdata = newdataT, exclude = "s(trap_id, bs ='re)", se.fit = TRUE)$fit
+newdataT$lpg  <- predict(mod_pb , newdata = newdataT,  exclude = ex)
+
+# Plot
+pTv <- ggplot(newdataT , aes(mean_temp , lp , colour = feeding_niche))+
+        geom_line(lty = 2 , lwd = .5)+
+        scale_color_viridis_d()+
+        geom_line(aes(y=lpg) , col = "black" , lwd = .7) + 
+        theme_linedraw()+
+          labs(x = "Week of the year" , y = "Linear predictor")+
+          ggtitle(label = expression(rho(T[g])))+
+          theme(plot.title = element_text(hjust = 0.5))
+
+
+# Get linear predictor values for fitted model for seasonal component 
+newdataP <- expand.grid(feeding_niche =  unique(all_data$feeding_niche), 
+                       trap_id      = all_data$trap_id[1], 
+                       week_year = 5:52 , 
+                       latitude_wgs84 = 64.1 , 
+                       longitude_wgs84 = 20.2 , 
+                       sampling_time = 10 , 
+                       trap_habitat = "forest" , 
+                       mean_temp = 10)
+
+msmooths      <- smooths(mod_pb)
+ex            <- msmooths[str_detect(msmooths , "feeding_niche")]
+newdataP$lp   <- predict(mod_pb , newdata = newdataP, exclude = "s(trap_id, bs ='re)", se.fit = TRUE)$fit
+newdataP$lpg  <- predict(mod_pb , newdata = newdataP,  exclude = ex)
+
+pPv <- ggplot(newdataP , aes(week_year , lp , colour = feeding_niche))+
+          geom_line(lty = 2 , lwd = .5)+
+          scale_color_viridis_d()+
+          theme_linedraw()+
+          labs(x = "Week of the year" , y = "Linear predictor")+
+          ggtitle(label = expression(rho(S[g])))+
+          theme(plot.title = element_text(hjust = 0.5))
+
+
+# Model with mean only temperature responses
+newdataP$lpmp <- predict(mod_b  , newdataP)
+pPm           <- ggplot(newdataP , aes(week_year , lpmp))+
+                  geom_line() + 
+                  theme_linedraw()+ 
+                  labs(x = "Week of the year" , y = "Linear predictor")+
+                  ggtitle(label = expression(rho(S)))+
+                  theme(plot.title = element_text(hjust = 0.5))
+
+# only mean phenological response
+newdataT$lpmt <- predict(mod_b  , newdataT)
+pTm           <- ggplot(newdataT , aes(mean_temp , lpmt ))+
+                  geom_line(col = "black" , lwd = .7) + 
+                  theme_linedraw()+
+                  labs(x = "Mean weekly temperature" , y = "Linear predictor")+
+                  ggtitle(label = expression(rho(T))) +
+                  theme(plot.title = element_text(hjust = 0.5))
+
+
+
+
+
+
+
+
+
+```
+
+For comparison we build a 'baseline' model of species richness over time where the seasonal component and community response to temperature is constant across all feeding guilds.
+
+```{r , echo = FALSE}
+
+pPm + pTm
+
+```
+
+
+We include several variables to control for spatial and environmental affects. 
+
+$$ Log(y_{i}) = \beta_{ih} x_{ih}  + \mu_{i} + \tau(X_i, Y_i) + \rho(T_{it}) + \rho(S_{t}) $$ 
+Where $\beta_{ih} x_{ih}$ represents the effect on species richness of habitat *h* on at site *i*, $\mu_{i}$ is a random intercept for each trap, and $\tau(X_i, Y_i)$ is a 2D isotropic smooth interaction for X & Y coordinations (longitude and latitude), to account for spatial autocorrelation in species richness. $\rho(T_{it})$ & $\rho(S_{t})$ are therefore the smooths for temperature (T) and seasonality (S) at time *t*. 
+
+### Model II - Guild level seasonal component, global temperature response.
+
+This model lets each feeding guild have a group-level seasonal component whilst the temperature response remains fixed across all guilds. 
+
+$$ Log(y_{itg}) = \beta_{ih} x_{ih}  + \mu_{i} + \tau(X_i, Y_i) + \rho(T_{it}) + \rho(S_{tg}) $$ 
+
+In this model, the seasonal smooth term is estimated separately for each guild *g*. 
+
+```{r}
+
+
+pPv + pTm + plot_layout(guides = "collect") & theme(legend.position='bottom')
+
+
+```
+
+
+### Model III - Guild level temperature response, global seasonal component.
+
+This model lets each feeding guild have a group-level temperature response whilst seasonality remains fixed across all guilds. 
+
+$$ Log(y_{itg}) = \beta_{ih} x_{ih}  + \mu_{i} + \tau(X_i, Y_i) + \rho(T_{itg}) + \rho(S_{t}) $$ 
+
+In this model, the guild level temperature smooths share the penalty parameter from the global temperature smooth (black line).
+
+```{r}
+
+
+pPm + pTv + plot_layout(guides = "collect") & theme(legend.position='bottom')
+
+
+```
+
+### Model IV - Guild level temperature response + guild level seasonal component.
+
+This model combines models II & III lets each feeding guild have a group-level seasonal component group level temperature responses. 
+$$ Log(y_{itg}) = \beta_{ih} x_{ih}  + \mu_{i} + \tau(X_i, Y_i) + \rho(T_{itg}) + \rho(S_{tg}) $$ 
+
+
+```{r}
+
+
+pPv + pTv + plot_layout(guides = "collect") & theme(legend.position='bottom')
+
+
+```
+
+### Model V - Guild level temperature response interacts with guild level seasonal component.
+
+The final model builds in a group-level interaction between the seasonal effect and temperature, so that temperature can modify the seasonality of each functional group. The term $\tau(T_{itg} , S_{itg}$ includes the group-level temperature and seasonality components of the previous models.
+
+$$ Log(y_{itg}) = \beta_{ih} x_{ih}  + \mu_{i} + \tau(X_i, Y_i) + \tau(T_{itg} , S_{itg})$$ 
+
+```{r}
+
+draw(mod_ptb , select = 2)
+
+```
