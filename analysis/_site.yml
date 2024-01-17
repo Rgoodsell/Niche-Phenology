@@ -11,6 +11,8 @@ navbar:
     href: license.html
   - text: Preliminary analysis
     href: preliminary_analysis.html
+  - text: Preliminary model selection
+    href: preliminary_model_selection.html
   right:
   - icon: fab fa-github
     text: Source code
