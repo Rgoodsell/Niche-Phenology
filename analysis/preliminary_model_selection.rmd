@@ -203,3 +203,22 @@ $$ Log(y_{itg}) = \beta_{ih} x_{ih}  + \mu_{i} + \tau(X_i, Y_i) + \tau(T_{itg} ,
 draw(mod_ptb , select = 2)
 
 ```
+
+
+### Results
+Model comparison with AIC
+```{r}
+library(gt)
+Model_I   = mod_b
+Model_II  = mod_ps
+Model_III = mod_pt
+Model_IV  = mod_pb 
+Model_V   = mod_ptb
+
+AIC(Model_I , Model_II , Model_III , Model_IV , Model_V)  |> rownames_to_column(var = "Model") |> gt()
+
+```
+
+
+
+

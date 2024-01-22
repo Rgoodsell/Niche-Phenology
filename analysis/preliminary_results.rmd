@@ -1,0 +1,34 @@
+---
+title: "Preliminary results"
+author: "Rob goodsell"
+date: "2024-01-22"
+output:
+  html_document:
+    toc: no
+    df_print: paged
+  workflowr::wflow_html:
+    toc: no
+    code_folding: hide
+  html_notebook: default
+site: workflowr::wflow_site
+editor_options:
+  chunk_output_type: console
+---
+```{r setup, echo = F}
+knitr::opts_chunk$set(echo = F)
+```
+
+## Introduction
+Below are some preliminary results from model fitsto display the geographic distributions of guild-specific species richness and changes in species accumulation over temperature gradients (i.e. hot and cold sites). 
+
+```{r , fig.cap= "Geographic distribution of guild-specific species richness. Maps are produced from simple gam fits to spatial locations whilst controlling for survey effort."}
+library(tiff)
+grid::grid.raster( tiff::readTIFF( "data/prelim_geo_dist.tiff") )
+```
+
+
+```{r , fig.cap= "Simulated trends in guild-specific species-richness from Model IV. Different coloured lines represent the seasonal trend of species richness under different deviations from the average yearly temperature trend across all sites. This essentially simulates the species accumulation trends across warmer and colder sites."}
+library(tiff)
+grid::grid.raster( tiff::readTIFF( "data/prelim_temp.tiff") )
+```
+

@@ -13,6 +13,8 @@ navbar:
     href: preliminary_analysis.html
   - text: Preliminary model selection
     href: preliminary_model_selection.html
+  - text: Preliminary results
+    href: preliminary_results.html
   right:
   - icon: fab fa-github
     text: Source code
