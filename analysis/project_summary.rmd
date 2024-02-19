@@ -1,0 +1,285 @@
+---
+title: "Project summary"
+author: "Rgoodsell"
+date: "2024-02-19"
+output: workflowr::wflow_html
+editor_options:
+  chunk_output_type: console
+---
+```{r setup, echo = F, warning = F}
+knitr::opts_chunk$set(echo = F, warning=F , message = F)
+```
+
+## Introduction
+This document illustrates some preliminary analysis and model selection steps taken when analysing the seasonal species richness trends of feeding guilds from the IBA data. Organisms in the IBA data can be grouped by their feeding niche into 6 categories, phytopahgous, predatory, saprophagous, and their corresponding parasitoids, by using the feeding guild classifications from Ronquist et al (2018). For each of these groups we can examine how guild-specific species richness accumulates across the year and in response to environmental drivers. The preliminary research questions are:
+
+1. What drives the temporal and spatial trends in species richness.
+2. What do the temporal & spatial trends look like.
+3. Do phenological reaction norms vary with environmental gradients?
+
+Here we propose competing ecological hypothesis about how species richness of guilds change over time and in response to the environment. We fit "hierarchical" generalised additive models using the 'mgcv' package, to examine whether community seasonal and environmental responses vary by feeding niche. 
+
+### Assignment of feeding guilds
+
+Feeding guilds were assigned at the family level to each OTU detected in the arthropod samples. Feeding guild data for the majority of species were derived from Ronquist et al (2018), who classified groups of insects as one of several feeding guilds based on the larval feeding guild for the majority of known Swedish species in that group. These assessments were conducted by expert taxonomists and classify organisms at either the Family or Sub-family level. The feeding guilds we use in this paper are phytophagous arthropods, predatory arthropods, and saprophagous arthropods, as well as their corresponding parasitoids. Parasitoids of phytophages, predators, and saprophages are classified at the sub-family level and belong to subfamilies of Brachonidae and Ichneumonidae. For any organisms that lacked representation in Ronquist et al (2018), we either derived a feeding guild from other sources, using assessments detailed in the appendix, or through assessments from expert taxonomists at SLU. 
+
+
+## Model specification
+
+To analyse the impact of environment on the seasonality of arthropod feeding guilds we fit hierarchical generalized additive models (HGAMS) to the species richness data. As data consist of over-dispersed counts of species in each guild, we assume our response variable was drawn from a negative binomial distribution. A simplified version of our model looks like: 
+
+
+$$ \eta = \rho(S) + \rho(T) + \rho(P) + \tau(X,Y) + \mu^{site} $$ 
+$$ log(y_g) = X\beta + \rho_g(S) + \rho_g(T) + \rho_g(P) + \tau_g(X, Y) + \mu^{guild} + \eta $$
+We formulate the model to incorporate global level and guild-level effects of environment. 
+Here, $\rho$ represents smooth functions of covariates for across three covariates, seasonality expressed as week of the year (S), temperature (T) and precipitation (P).  Separating seasonal and climatic effects in this way allows us to model the effect of seasonality, i.e. the time dependent effect season on species richness, and climate independently of one another, as well as account for unobserved temporal effects in species richness not accounted for by our climatic variables. $\tau$ represents a two-dimensional smooth interaction (calculated as a tensor product) between longitude (X) and latitude (Y), this term is included to account for spatial variation in drivers of species richness not accounted for in our environmental drivers. 
+$\mu^{site}$ is a random intercept of trapping location. 
+
+
+Guild level responses are then modeled as a function of this global linear predictor $\eta$ and guild level covariates. We model the effect of the fractional cover of habitat covariate h as a function of g…G guild-level random slopes. Therefore $X$ is a matrix of fractional cover values for four types of habitat (forest, crop, grass, and shrub), and \beta is the corresponding matrix of coefficients.  Group-level seasonal and climatic effects are included through the smooth functions of covariates $rho_g(S) + \rho_g(T) + \rho_g(P)$.  $\tau_g(X,Y)$ represents guild-level spatial interaction terms between longitude (X) and latitude (Y), to account for large scale spatial variation in species richness between guilds that is not accounted for by geographic variation in habitat preference or temperature. These models are 'hierarchical' in the sense that smoothing penalty term in group level smooths is shared with the global smooth, the logic being that each guild behaves similarly to but varies from the global species richness trend. The result is that global and group-level smooths share the same level of ‘wiggliness’, but guilds can vary from this global trend as each smooth is estimated separately. Seasonal smooth effects \f_{Sg} are modeled using cyclic cubic splines to ensure that seasonal trends start and end at the same time each year. Temperature and spatial effects are modelled as thin plate regression splines. All models are fit using using the ‘mgcv’ package in R. 
+
+#### Variable selection
+We use the double penalty approach to implement variable selection as described in [Wood et al (2011)](doi:10.1016/j.csda.2011.02.004). This approach applies shrinkage to terms that contribute less to the models likelihood, effectively removing terms with small effect sizes and penalising model complexity.  This approach has been demonstrated to allow principled term selection whilst maintaining predictive performance of models.
+
+The mgcv syntax to fit this model looks like the following: 
+```{r , echo = TRUE ,eval=FALSE , results = 'hide'}
+
+library(mgcv)
+knots <- list(week_year = c(5, 52))
+
+mod <- gam(n_OTU ~ 
+              
+                s(feeding_niche , forest_cover , bs = "re")
+              + s(feeding_niche , crop_cover , bs = "re")
+              + s(feeding_niche , shrub_cover , bs = "re")
+              + s(feeding_niche , grass_cover , bs = "re")
+              
+              + s(week_year , bs = "cc" , k = 6 , m=2)  
+              + s(week_year ,feeding_niche , bs = c("fs") , k=6, m = 2)
+              
+              + s(mean_w_temp , bs = "ts" ,k = 8, m = 2)
+              + s(mean_w_temp , feeding_niche , bs = ("fs"), k=8 , m = 2)
+              
+              + s(mean_w_prec , bs = "ts" ,k = 8, m = 2)
+              + s(mean_w_prec , feeding_niche , bs = ("fs"), k=8 , m = 2)
+              
+              + s(feeding_niche , bs = "re")
+              + s(longitude_wgs84 , latitude_wgs84 , bs = "tp")
+              + s(longitude_wgs84 , latitude_wgs84 , feeding_niche, bs = "fs")
+              
+              + s(trap_id , bs = "re")
+              + offset(log(sampling_time)),
+                knots = knots,
+              family = "nb" , method = "REML",  data = all_data ,select = TRUE)
+```
+
+
+## Results 
+
+### Model coefficients
+
+```{r, message=FALSE,echo=FALSE, fig.height=8, fig.cap= "Figure 1. Model output for habitat coefficients, and smooth terms for seasonal and climatic components"}
+# plot coefficients from model ----------------------------------------------------------------
+
+library(tidyverse)
+library(lubridate)
+library(mgcv)
+library(viridis)
+library(gratia)
+library(rnaturalearth)
+library(rnaturalearthdata)
+library(sf)
+library(patchwork)
+
+set.seed(3)
+# load data -----------------------------------------------------------------------------------
+
+# Environmental data
+all_data <- readRDS("data/all_data.rds")
+mod      <- readRDS("data/mod_pk.rds")
+
+# options for plotting
+ylimsS <-c(-5,2) # smooth terms ylims
+
+# plot coefficients ---------------------------------------------------------------------------
+
+newDataS <- expand.grid(week_year   = 5:52 , 
+                       mean_w_temp  = 10 , 
+                       mean_w_prec  = 10 ,
+                       forest_cover = 10 , 
+                       grass_cover  = 10 , 
+                       shrub_cover  = 10 ,
+                       crop_cover   = 10 , 
+                       feeding_niche   =  unique(all_data$feeding_niche), 
+                       trap_id           = all_data$trap_id[1], 
+                       latitude_wgs84    = 64.1 , 
+                       longitude_wgs84   = 20.2 , 
+                       sampling_time     = 10 )
+
+
+
+# Global and group level predictions
+
+lp           <- predict(mod , newdata = newDataS, exclude = "s(trap_id)" , type = "terms")
+newDataS$lp   <- lp[,"s(week_year)"] + lp[,"s(week_year,feeding_niche)"]
+newDataS$lpg  <- lp[,"s(week_year)"] 
+
+
+pS <- ggplot(newDataS , aes(week_year , lp , colour = feeding_niche))+
+        geom_line(lty = 2 , lwd = 1)+
+        scale_color_viridis_d()+
+        geom_line(aes(y=lpg) , col = "black" , lwd = 1.2) + 
+        theme_linedraw()+
+        scale_y_continuous(limits=ylimsS)+
+        labs(x = "Week of the year" , y = "Partial effect" , colour = "Feeding guild")+
+        ggtitle(label = expression(rho(S[g])))+
+        theme(plot.title = element_text(hjust = 0.5))
+
+
+
+
+# temperature ---------------------------------------------------------------------------------
+
+newDataT <- expand.grid(week_year   = 25 , 
+                        mean_w_temp   = -10:23 , 
+                        mean_w_prec  = 10 ,
+                        forest_cover = 10 , 
+                        grass_cover  = 10 , 
+                        shrub_cover  = 10 ,
+                        crop_cover   = 10 , 
+                        feeding_niche   =  unique(all_data$feeding_niche), 
+                        trap_id           = all_data$trap_id[1], 
+                        latitude_wgs84    = 64.1 , 
+                        longitude_wgs84   = 20.2 , 
+                        sampling_time     = 10 )
+
+
+
+# Global and group level predictions
+lp           <- predict(mod , newdata = newDataT, exclude = "s(trap_id)" , type = "terms")
+newDataT$lp   <- lp[,"s(mean_w_temp)"] + lp[,"s(mean_w_temp,feeding_niche)"]
+newDataT$lpg  <- lp[,"s(mean_w_temp)"] 
+
+pT <- ggplot(newDataT , aes(mean_w_temp , lp , colour = feeding_niche, group=feeding_niche))+
+          geom_line(lty = 2 , lwd = 1)+
+          scale_color_viridis_d()+
+          geom_line(aes(y=lpg) , col = "black" , lwd = 1.2) + 
+          theme_linedraw()+
+          scale_y_continuous(limits=ylimsS)+
+          labs(x = "Average weekly temperature" , y = "Partial effect" , colour = "Feeding guild")+
+          ggtitle(label = expression(rho(T[g])))+
+          theme(plot.title = element_text(hjust = 0.5))
+
+# precipitation -------------------------------------------------------------------------------
+
+newDataP <- expand.grid(week_year   = 25 , 
+                        mean_w_temp   = 10 , 
+                        mean_w_prec  = 0:13 ,
+                        forest_cover = 10 , 
+                        grass_cover  = 10 , 
+                        shrub_cover  = 10 ,
+                        crop_cover   = 10 , 
+                        feeding_niche   =  unique(all_data$feeding_niche), 
+                        trap_id           = all_data$trap_id[1], 
+                        latitude_wgs84    = 64.1 , 
+                        longitude_wgs84   = 20.2 , 
+                        sampling_time     = 10 )
+
+
+# Global and group level predictions
+lp           <- predict(mod , newdata = newDataP, exclude = "s(trap_id)" , type = "terms")
+newDataP$lp   <- lp[,"s(mean_w_prec)"] + lp[,"s(mean_w_prec,feeding_niche)"]
+newDataP$lpg  <- lp[,"s(mean_w_prec)"] 
+
+pP <- ggplot(newDataP , aes(mean_w_prec , lp , colour = feeding_niche, group=feeding_niche))+
+  geom_line(lty = 2 , lwd = 1)+
+  scale_color_viridis_d()+
+  geom_line(aes(y=lpg) , col = "black" , lwd = 1.2) + 
+  theme_linedraw()+
+  scale_y_continuous(limits=ylimsS)+
+  labs(x = "Average weekly precipitation" , y = "Partial effect" , colour = "Feeding guild")+
+  ggtitle(label = expression(rho(P[g])))+
+  theme(plot.title = element_text(hjust = 0.5))
+
+
+# habitat coefficients ------------------------------------------------------------------------
+newDataH <- expand.grid(week_year   = 25 , 
+                        mean_w_temp   = 10 , 
+                        mean_w_prec  = 10 ,
+                        forest_cover = 10 , 
+                        grass_cover  = 10 , 
+                        shrub_cover  = 10 ,
+                        crop_cover   = 10 , 
+                        feeding_niche   =  unique(all_data$feeding_niche), 
+                        trap_id           = all_data$trap_id[1], 
+                        latitude_wgs84    = 64.1 , 
+                        longitude_wgs84   = 20.2 , 
+                        sampling_time     = 10 )
+
+habP   <- predict(mod , newdata = newDataH, exclude = "s(trap_id)" , type = "terms" , se.fit=TRUE)
+lph    <- habP$fit[,1:4]
+lph.se <- habP$se.fit[,1:4]
+colnames(lph) <- paste0(c("forest_cover" , "crop_cover" , "shrub_cover" , "grass_cover"),".val")
+colnames(lph.se) <- paste0(c("forest_cover" , "crop_cover" , "shrub_cover" , "grass_cover"),".se")
+
+habData <- cbind(lph , lph.se) |> as.data.frame() |> 
+            transform(feeding_niche = newDataH$feeding_niche) |> 
+          pivot_longer(-feeding_niche,
+                       names_to = c("habitat", ".value"), 
+                       names_sep="\\." )
+
+
+pH <- ggplot(habData, aes(habitat , val))+ 
+          geom_hline(yintercept = 0 , lty = 3 , size = .5)+
+          geom_errorbar(aes(ymin = val - se , ymax = val + se) , width = 0 , size = 1)+
+          geom_point(aes(colour = feeding_niche) , show.legend = FALSE , size = 2)+
+          facet_wrap(~feeding_niche)+
+          theme_linedraw()+
+          theme(axis.text.x =  element_text(angle = 90))+
+          labs(x = "Habitat cover" , y = "Partial effect")
+  
+  
+  
+
+print(pH / (pS + pT + pP + plot_layout(guides = "collect") & theme(legend.position = 'bottom')))
+```
+
+
+Figure 1 illustrates the main output from the model. The top panel illustrates the habitat coefficients for each feeding guild, the bottom three panels the main smooth effects of week, temperature and precipitation. The main take-aways here are that seasonal and temperature effects are the main drivers of species richness across and between guilds. There is some sensitivity to habitat covariates, but these are guild and cover type dependent. 
+
+### Temporal trends
+
+```{r ,fig.height=8, fig.cap= 'Figure 2. Temporal trends in guild level species richness'}
+library(tiff)
+grid::grid.raster( tiff::readTIFF( "data/prelim_temp.tiff") )
+```
+
+Figure 2. Illustrates the the temporal trends in species richness across guilds, simulated across different yearly temperature trends. Temperature trends are simulated as deviations (in degrees centigrade) away from the average yearly trend across sites. 
+
+### Spatial patterns
+
+```{r ,fig.height=8, fig.cap= 'Figure 3. Geographic distribution of guild-specific species richness"'}
+library(tiff)
+grid::grid.raster( tiff::readTIFF( "data/prelim_geo_dist.tiff") )
+```
+
+Figure 3. Illustrates model estimates of species richness across 1km gridded habitat, temperature and precipitation covariates. Climatic variables used were the average values for July. 
+
+### Phenological reaction norms
+
+```{r, fig.cap="Figure 4. Changes in phenological reaction norms with temperature"}
+
+out <- readRDS("data/prelim_reaction_norm.rds")
+ggplot(out , aes(temp_th , aThresh , colour = delta_temp))+ 
+  geom_point()+
+  facet_wrap(~feeding_niche, scales = "free")+
+  theme_linedraw() + 
+  scale_colour_viridis()+
+  labs(x = "Week at which temperature threshold is reached" ,
+       y = "Week of 50% of max species richness" , 
+       colour = "Temperature anomaly")+
+  theme(legend.position = "bottom")
+
+```
+
+Figure 4 illustrates how phenological reaction norms vary with environmental space (in this case temperature gradients). 
