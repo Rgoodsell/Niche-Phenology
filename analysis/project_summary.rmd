@@ -267,7 +267,7 @@ Figure 3. Illustrates model estimates of species richness across 1km gridded hab
 
 ### Phenological reaction norms
 
-```{r, fig.cap="Figure 4. Changes in phenological reaction norms with temperature"}
+```{r, fig.cap="Figure 4. Systematic variation in the phenological reaction norm of individual guilds  across environmental space. Shown is variation in the date when half of all species in a guild have been detected in the trap as plotted against the date when a specific sum of heat-degree days has been achieved. If species within the guild would time their activity equally with respect to this external cue across environmental space, then the timing between the date when the cue is reached and median guild-specific phenology is scored would stay constant (see horizontal line shown in red for comparison). If the sensitivity of median guild-specific phenology increases with a colder climate (e.g., to compensate for a cooler and shorter summer), then we expect an earlier median guild-specific phenology with a later date when the cue is reached (as reflected in the down-ward bending of the curve compared to the horizontal line)"}
 
 out <- readRDS("data/prelim_reaction_norm.rds")
 outTrend <- out |> 
@@ -291,4 +291,7 @@ ggplot(out , aes(temp_th , aThresh , colour = delta_temp))+
 
 ```
 
-Figure 4 illustrates how phenological reaction norms vary with environmental space (in this case temperature gradients). 
+Figure 4 illustrates how median guild-specific changes with a temperature related environmental cue. Here I simulated phenology with respect to different temperature trends which essentially represent different sites. If we expect guilds to not adjust their phenology with respect to the environment all communities should continue along the same trend line, represented by the dashed line. If communities adjust their timing to reach the same phenophase (i.e. the 50% threshold) then we would expect earlier phenophase (Y axis) with later temperature thresholds, i.e. cold-site communities are more sensitive to a lower level of a cue. This is illustrated by rightwards bending of lines seen for phytophages, predators, saprophages, and phytophage parasitoids (uncertainty estimation pending). The negative trends in phenophase for predator and saprophage parasitoids suggest that these guilds mainly time their phenology with respect to a different cue (e.g. abundance of hosts), however, the curve in the lines suggest that cold-site communities are more sensitive to the cue, as they reach the same phenophase with a lower cue threshold. 
+
+
+
