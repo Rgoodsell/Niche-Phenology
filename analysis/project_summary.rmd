@@ -270,11 +270,20 @@ Figure 3. Illustrates model estimates of species richness across 1km gridded hab
 ```{r, fig.cap="Figure 4. Changes in phenological reaction norms with temperature"}
 
 out <- readRDS("data/prelim_reaction_norm.rds")
+outTrend <- out |> 
+            group_by(feeding_niche) |> 
+            arrange(-delta_temp) |> 
+            mutate(n = 1:n()) |> 
+            filter(n <= 10)
+
+
 ggplot(out , aes(temp_th , aThresh , colour = delta_temp))+ 
   geom_point()+
   facet_wrap(~feeding_niche, scales = "free")+
   theme_linedraw() + 
   scale_colour_viridis()+
+  geom_smooth(data = outTrend , aes(temp_th ,aThresh) , method = "lm" , 
+              fullrange = TRUE , se = FALSE , lty = 2 , lwd = .5)+
   labs(x = "Week at which temperature threshold is reached" ,
        y = "Week of 50% of max species richness" , 
        colour = "Temperature anomaly")+
